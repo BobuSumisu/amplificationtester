@@ -1,22 +1,9 @@
 #!/usr/bin/python 
 # -*- coding: utf-8 -*-
 
-# AmplificationTester v0.1
+# AmplificationTester v0.2
 # by Øyvind Ingvaldsen <oyvind.ingvaldsen@gmail.com>
 # License: MIT
-
-# 2014-01-09:
-#   Output to CSV.
-#   Input from stdin.
-#   Added the 'exploitable' field.
-#   Simple threading of output with queues.
-#   
-# 2014-01-08:
-#   First "working" version. 
-#   Support for DNS, NTP and CHARGEN. 
-#   Command line parsing.
-#   Pretty output to terminal or JSON.
-
 
 import errno
 import socket
