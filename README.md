@@ -7,6 +7,7 @@ Currently it supports tests for DNS, NTP and CHARGEN attacks.
 
 Todo
 ----
+- Remove netaddr dependency (own CIDR parsing function)
 - «Real» verification by using two machines (one spoofing packets to the other).
 - Country-code to netblocks
 - SNMP

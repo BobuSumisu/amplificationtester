@@ -11,18 +11,11 @@ from socket import error as SocketError
 import json
 import csv
 import time
-from threading import Thread
+from threading import Thread, Lock
 from Queue import Queue
 from select import select
 from pprint import pprint
 from binascii import hexlify
-
-TERM_MOD = '\033['
-TERM_END = TERM_MOD + '0m'
-TERM_BOLD = TERM_MOD + '1m'
-TERM_RED = TERM_MOD + '91m'
-TERM_GREEN = TERM_MOD + '92m'
-
 
 def whois_lookup(server, request):
   """
@@ -142,41 +135,33 @@ def test_dns(target_ip, timeout):
 
 def thread_task():
   """
-  The 'worker' thread
+  The peasant
   """
   while True:
     target = queue.get()
     if args.dns:
-      results.append(test_dns(target, args.timeout))
+      res = test_dns(target, args.timeout)
+      results.append(res)
+      if args.output_format == 'text':
+        color = '\033[92m' if res['amplification_factor'] > 1.0 else '\033[91m'
+        with output_lock:
+          print('{}[DNS] {}: {}\033[0m'.format(color, target, res['amplification_factor']))
     if args.chargen:
-      results.append(test_chargen(target, args.timeout))
+      res = test_chargen(target, args.timeout)
+      results.append(res)
+      if args.output_format == 'text':
+        color = '\033[92m' if res['amplification_factor'] > 1.0 else '\033[91m'
+        with output_lock:
+          print('{}[CHARGEN] {}: {}\033[0m'.format(color, target, res['amplification_factor']))
     if args.ntp:
-      results.append(test_ntp(target, args.timeout))
-    queue.task_done()
+      res = test_ntp(target, args.timeout)
+      results.append(res)
+      if args.output_format == 'text':
+        color = '\033[92m' if res['amplification_factor'] > 1.0 else '\033[91m'
+        with output_lock:
+          print('{}[NTP] {}: {}\033[0m'.format(color, target, res['amplification_factor']))
 
-def print_test_result(result, verbose=False):
-    """
-    Helper-function for semi-pretty printing test results to terminal. 
-    """
-    if verbose:
-      output = '      {}:\n'.format(result['type'])
-      output += '        {} bytes sent\n'.format(result['bytes_sent'])
-      output += '        {} bytes received\n'.format(result['bytes_received'])
-      output += '        '
-      if result['amplification_factor'] > 1:
-        output += TERM_BOLD + TERM_GREEN
-      else:
-        output += TERM_RED
-      output += '{:.2f}{} amplification factor'.format(result['amplification_factor'], TERM_END)
-      print(output)
-    else:
-      output = '      {}: '.format(result['type'])
-      if result['amplification_factor'] > 1:
-        output += TERM_BOLD + TERM_GREEN
-      else:
-        output += TERM_RED
-      output += '{:.2f}'.format(result['amplification_factor']) + TERM_END
-      print(output)
+    queue.task_done()
 
 if __name__ == '__main__':
   """
@@ -194,60 +179,60 @@ if __name__ == '__main__':
 
   parser = argparse.ArgumentParser()
 
-  parser.add_argument('-v', '--verbose', help='increase output verbosity', action='store_true')
-  parser.add_argument('--timeout', help='timeout in seconds', type=float, default=1.5)
-  parser.add_argument('--threads', help='number of (python) threads to use', type=int, default=100)
+  output_group = parser.add_argument_group('output options')
+  output_group.add_argument('-e', '--time-estimate', action='store_true')
+  output_group.add_argument('-o', '--output-format', type=str, choices=['text','csv','json'], default='text')
 
-  output_group = parser.add_mutually_exclusive_group()
-  output_group.add_argument('--json', help='output all results as JSON', action='store_true')
-  output_group.add_argument('--csv', help='output all results as CSV (with headers)', action='store_true')
+  options_group = parser.add_argument_group('execution options')
+  options_group.add_argument('-t', '--timeout', type=float, default=1.5)
+  options_group.add_argument('-m', '--max-threads', type=int, default=100)
 
-  target_group = parser.add_argument_group('target (REQUIRED)')
-  target_group.add_argument('--ip', type=str, action='append')
-  target_group.add_argument('--cidr', type=str, action='append')
-  target_group.add_argument('--asn', type=str, action='append')
-  target_group.add_argument('--country-code', type=str, action='append')
-  target_group.add_argument('--file', help='read IPs from a file', type=file, metavar='FILENAME')
+  target_group = parser.add_argument_group('target options')
+  target_group.add_argument('-i', '--ip', type=str, action='append')
+  target_group.add_argument('-n', '--net', type=str, action='append')
+  target_group.add_argument('-a', '--asn', type=str, action='append')
+  target_group.add_argument('-c', '--country-code', type=str, action='append')
+  target_group.add_argument('-f', '--file', type=file, metavar='FILENAME')
 
-  test_group = parser.add_argument_group('amplification tests')
-  test_group.add_argument('--dns', help='test for DNS amplification', action='store_true')
-  test_group.add_argument('--chargen', help='test for CHARGEN amplification', action='store_true')
-  test_group.add_argument('--ntp', help='test for NTP amplification', action='store_true')
-  test_group.add_argument('--all', help='run all tests', action='store_true')
+  test_group = parser.add_argument_group('tests options')
+  test_group.add_argument('-D', '--dns', action='store_true')
+  test_group.add_argument('-C', '--chargen', action='store_true')
+  test_group.add_argument('-N', '--ntp', action='store_true')
+  test_group.add_argument('-A', '--all', action='store_true')
 
   args = parser.parse_args()
 
-  # fail if no test specified
   if not (args.all or args.dns or args.chargen or args.ntp):
     parser.print_help()
     exit(1)
+  elif args.all:
+    num_tests = 3
+  else:
+    num_tests = 1
 
   if args.all:
     args.dns = args.chargen = args.ntp = True
      
-  # list of targets (IPs)
+  # list of target as IP strings
   targets = []
   
-  # parse IP inputs
+  # parse IPs
   if args.ip:
     for ip in args.ip:
-      if ip not in targets:
-        targets.append(ip)
+      targets.append(ip)
 
-  # parse CIDR inputs
-  if args.cidr:
+  # parse nets in CIDR notation
+  if args.net:
     if not has_netaddr:
       print("You need the 'netaddr' package to parse CIDR strings (pip install netaddr).") 
       exit(1)
 
-    for cidr in args.cidr:
+    for cidr in args.net:
       net = netaddr.IPNetwork(cidr)
       for ip in net:
-        ip = str(ip)
-        if ip not in targets:
-          targets.append(ip)
+        targets.append(str(ip))
 
-  # parse ASN inputs using ...
+  # parse ASNs using shadowserver :)
   if args.asn:
     if not has_netaddr:
       print("You need the 'netaddr' package to parse CIDR strings (pip install netaddr).") 
@@ -258,11 +243,9 @@ if __name__ == '__main__':
       for cidr in response.split('\n'):
         if len(cidr) != 0:
           for ip in netaddr.IPNetwork(cidr):
-            ip = str(ip)
-            if ip not in targets:
-              targets.append(ip)
+            targets.append(str(ip))
 
-  # parse country code inputs using ...
+  # parse country codes using .. something soon
   if args.country_code:
     if not has_netaddr:
       print("You need the 'netaddr' package to parse CIDR strings (pip install netaddr).") 
@@ -275,70 +258,56 @@ if __name__ == '__main__':
         cidr = cidr.strip()
         if len(net) != 0:
           for ip in netaddr.IPNetwork(cidr):
-            ip = str(ip)
-            if ip not in targets:
-              targets.append(ip)
+            targets.append(str(ip))
 
-
-  # parse input from file
+  # parse input from file (expects a list of IPs)
   if args.file:
     for ip in args.file.read().strip().split('\n'):
-      ip = ip.strip()
-      if not ip in targets:
-        targets.append(ip)
+      targets.append(ip.strip())
 
-  # parse input from stdin
+  # parse input from stdin (expects a list of IPs)
   if select([sys.stdin], [], [], 0)[0]:
     for ip in sys.stdin.read().strip().split('\n'):
-      ip = ip.strip()
-      if not ip in targets:
-        targets.append(ip)
+      targets.append(ip.strip())
 
-  # exit if we have zero target IPs
+  # exit if we haven't got any targets
   if len(targets) == 0:
     parser.print_help()
     exit(1)
 
-  # non-terminal output is threaded
-  if args.json or args.csv:
+ 
+  # a simple time estimate, based on max threads, timeout and number of tests to run per target
+  time_estimate = (int(len(targets) / args.max_threads) + 1) * (args.timeout * 1.1) * num_tests
 
-    queue = Queue()
-    results = []
+  if args.time_estimate:
+    print('Time estimate: {} seconds'.format(time_estimate))
+    exit(0)
 
-    for i in range(args.threads):
-      t = Thread(target=thread_task)
-      t.daemon = True
-      t.start()
+  if args.output_format == 'text':
+    print('[*] Starting testing of {} IPs'.format(len(targets)))
+    print('[*] Time estimate: {:.2f} seconds'.format(time_estimate))
 
-    for target in targets:
-      queue.put(target)
+  queue = Queue()
+  output_lock = Lock()
+  results = []
+  start_time = time.time()
 
-    queue.join()
+  for i in range(args.max_threads):
+    t = Thread(target=thread_task)
+    t.daemon = True
+    t.start()
 
-    if args.json:
-      print(json.dumps(results, sort_keys=True, indent=2))
-    elif args.csv:
-      writer = csv.DictWriter(sys.stdout, ['type','target_ip','port','bytes_sent','bytes_received','amplification_factor','exploitable'], dialect='excel')
-      writer.writeheader()
-      writer.writerows(results)
+  for target in targets:
+    queue.put(target)
+
+  queue.join()
   
-  # output to terminal (not threaded)
-  else:
-    print('[*] Starting testing of {} targets'.format(len(targets)))
-    print('[!] Warning: this is not threaded. Use --csv or --json for super fast processing!')
-    start_time = time.time()
-    for target in targets:
-      print('[*] Testing IP: {}'.format(target))
+  if args.output_format == 'text':
+    print('[*] Finished in {:.2f} seconds'.format(time.time() - start_time))
 
-      if args.dns:
-        result = test_dns(target, args.timeout)
-        print_test_result(result, args.verbose)
-
-      if args.chargen:
-        result = test_chargen(target, args.timeout)
-        print_test_result(result, args.verbose)
-
-      if args.ntp:
-        result = test_ntp(target, args.timeout)
-        print_test_result(result, args.verbose)
-    print('[*] Testing done in {:.2f} seconds'.format(time.time() - start_time))
+  if args.output_format == 'json':
+    print(json.dumps(results, sort_keys=True, indent=2))
+  elif args.output_format == 'csv':
+    writer = csv.DictWriter(sys.stdout, ['type','target_ip','port','bytes_sent','bytes_received','amplification_factor','exploitable'], dialect='excel')
+    writer.writeheader()
+    writer.writerows(results)
