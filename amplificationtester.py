@@ -5,8 +5,6 @@
 # by Øyvind Ingvaldsen <oyvind.ingvaldsen@gmail.com>
 # License: MIT
 
-# Changelog:
-#
 # 2014-01-09:
 #   Output to CSV.
 #   Input from stdin.
@@ -19,10 +17,6 @@
 #   Command line parsing.
 #   Pretty output to terminal or JSON.
 
-# TODO:
-#   - SNMP Amplification
-#   - QOTD Amplification
-#   - DNS truncated -> TCP?
 
 import errno
 import socket
@@ -256,10 +250,7 @@ if __name__ == '__main__':
   # parse CIDR inputs
   if args.cidr:
     if not has_netaddr:
-      print("Sorry...")
-      print("You need the 'netaddr' package to parse CIDR strings.") 
-      print("If you have pip installed you can install it with: pip install netaddr")
-      print("Otherwise download and see the docs at: https://github.com/drkjam/netaddr")
+      print("You need the 'netaddr' package to parse CIDR strings (pip install netaddr).") 
       exit(1)
 
     for cidr in args.cidr:
@@ -271,6 +262,9 @@ if __name__ == '__main__':
 
   # parse ASN inputs using ...
   if args.asn:
+    if not has_netaddr:
+      print("You need the 'netaddr' package to parse CIDR strings (pip install netaddr).") 
+      exit(1)
     for asn in args.asn:
       asn = asn.strip()
       response = whois_lookup('asn.shadowserver.org', 'prefix {}\n'.format(asn))
@@ -283,6 +277,9 @@ if __name__ == '__main__':
 
   # parse country code inputs using ...
   if args.country_code:
+    if not has_netaddr:
+      print("You need the 'netaddr' package to parse CIDR strings (pip install netaddr).") 
+      exit(1)
     raise NotImplementedError('WTB a CC to CIDR db')
     for cc in args.country_code:
       cc = cc.strip()
