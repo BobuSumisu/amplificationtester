@@ -36,12 +36,12 @@ def send_and_receive_udp(target_ip, port, timeout=1.0, payload='0', buffer_size=
   """
   Helper function to send and receive UDP packets (receives until timeout).
   """
+  data = ''
   try:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout)
     sock.connect((target_ip, port))
     bytes_sent = sock.send(payload)
-    data = ''
     while True:
       buff = sock.recv(buffer_size) 
       if len(buff) == 0:
@@ -51,7 +51,7 @@ def send_and_receive_udp(target_ip, port, timeout=1.0, payload='0', buffer_size=
   except SocketError as e:
     if len(data):
       return (True, { 'bytes_sent': bytes_sent, 'bytes_received': len(data), 'data': data })
-    return (False, { 'bytes_sent': bytes_sent })
+    return (False, str(e))
   finally:
     sock.close()
 
